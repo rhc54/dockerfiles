@@ -2,7 +2,7 @@
 
 # docker build -t ompi-toy-box:latest -f Dockerfile.oldpy.ssh .
 
-docker build -t ompi-toy-box:latest -f Dockerfile.ssh .
+docker build -t rhc-local:basic -f Dockerfile.ssh .
 
 # docker build -t ompi-toy-box:ubuntu -f Dockerfile.ubuntu .
 

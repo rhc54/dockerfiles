@@ -1,0 +1,3 @@
+stopswarm='/Users/rhc/dockerswarm/tmp/*.sh; rm /Users/rhc/dockerswarm/tmp/*.sh'
+enter=/Users/rhc/dockerswarm/drop-in.sh
+enter2=/Users/rhc/dockerswarm/drop-in2.sh

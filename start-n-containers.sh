@@ -3,7 +3,7 @@
 #
 # Default values
 #
-IMAGE_NAME=ompi-toy-box:latest
+IMAGE_NAME=rhc-local:basic
 OVERLAY_NETWORK=pmix-net
 NNODES=3
 INSTALL_DIR=

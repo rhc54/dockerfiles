@@ -27,7 +27,6 @@ RUN dnf -y update && \
     dnf -y install epel-release && \
     dnf repolist && \
     dnf -y group install "Development Tools" && \
-    dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo && \
     dnf -y install \
     openssh-server openssh-clients openssl-devel\
     strace \
@@ -36,19 +35,19 @@ RUN dnf -y update && \
     autoconf automake libtool flex bison \
     iproute net-tools hwloc make git \
     libnl3 gtk2 atk cairo tcl tcsh tk pciutils lsof ethtool bc file \
-    psmisc valgrind man \
-    zlib zlib-devel procps libesmtp-devel \
+    psmisc valgrind man rsyslog \
+    zlib zlib-devel zlib-ng zlib-ng-devel procps libesmtp-devel ucx ucx-devel \
     bzip2 bzip2-devel rpm-build libffi-devel vim && \
     dnf clean all
 
-RUN wget https://www.python.org/ftp/python/3.11.7/Python-3.11.7.tgz && \
-    tar xvf Python-3.11.7.tgz && \
-    cd Python-3.11.7 && \
+RUN wget https://www.python.org/ftp/python/3.14.3/Python-3.14.3.tgz && \
+    tar xvf Python-3.14.3.tgz && \
+    cd Python-3.14.3 && \
     ./configure --enable-optimizations && \
     make altinstall && \
-    /usr/local/bin/python3.11 -m pip install --upgrade pip && \
-    /usr/local/bin/python3.11 -m pip install sphinx recommonmark docutils sphinx-rtd-theme && \
-    ln -s /usr/local/bin/python3.11 /usr/local/bin/python
+    /usr/local/bin/python3.14 -m ensurepip --upgrade && \
+    /usr/local/bin/python3.14 -m pip install sphinx recommonmark docutils sphinx-rtd-theme sphobjinv && \
+    ln -s /usr/local/bin/python3.14 /usr/local/bin/python
 
 # ------------------------------------------------------------
 # Define support libraries
@@ -173,5 +172,5 @@ CMD ["/usr/sbin/sshd", "-D"]
 
 USER root
 RUN /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python2 50 && \
-    /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python3.6 40
+    /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python3.14 40
 

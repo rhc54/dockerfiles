@@ -1,0 +1,5 @@
+#!/bin/bash
+
+pushd /Users/rhc/dockerswarm/
+./start-n-containers.sh --build /Users/rhc/dswarm/build --install /Users/rhc/dswarm/install $*
+popd
