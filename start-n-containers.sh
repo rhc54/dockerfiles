@@ -5,7 +5,7 @@
 #
 IMAGE_NAME=ompi-toy-box:latest
 OVERLAY_NETWORK=pmix-net
-NNODES=2
+NNODES=3
 INSTALL_DIR=
 BUILD_DIR=
 
@@ -99,20 +99,6 @@ startup_container()
     fi
 
     # --privileged
-    #   - Needed for debugger support on Mac to set ptrace_scope
-    # Since this setting is "sticky" we can set it before starting the cluster
-    # so we do not need to run the cluster in privileged mode.
-    CMD=(docker run --privileged ${IMAGE_NAME} sh -c "echo 0 > /proc/sys/kernel/yama/ptrace_scope")
-    if [ 0 != $DRYRUN ] ; then
-        echo "${CMD[@]}"
-    else
-        "${CMD[@]}"
-        RTN=$?
-        if [ 0 != $RTN ] ; then
-            echo "Error: Failed to adjust ptrace_scope"
-            exit 1
-        fi
-    fi
 
     CMD="docker run --rm \
         --cap-add=SYS_NICE --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \

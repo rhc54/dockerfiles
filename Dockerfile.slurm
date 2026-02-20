@@ -1,0 +1,184 @@
+#
+# Base Build box for PRRTE CI
+# Requires:
+#  - Basic compile tooling and runtime support
+#  - libevent
+#  - hwloc 2.x
+# Optional:
+#  - PMIx - built in a location that can be replaced with volume mount
+#    - For now use 'master' branch
+#  - PRRTE - built in a location that can be replaced with volume mount
+#    - For now use 'master' branch
+#  - Open MPI - built in a location that can be replaced with volume mount
+#    - For now use 'master' branch
+#
+# Directory structure for volume mounting
+# - Build directory to mount in the source from the local file system
+#   /opt/hpc/local/build/
+# - Install directory to mount in an installation directory to be shared between containers
+#   /opt/hpc/external/{pmix,prrte,ompi}
+#
+FROM rockylinux:9
+
+# ------------------------------------------------------------
+# Install required packages
+# ------------------------------------------------------------
+RUN dnf -y update && \
+    dnf -y install epel-release && \
+    dnf repolist && \
+    dnf -y group install "Development Tools" && \
+    dnf -y install \
+    openssh-server openssh-clients openssl-devel\
+    strace \
+    binutils less wget which sudo \
+    perl perl-Data-Dumper numactl \
+    autoconf automake libtool flex bison \
+    iproute net-tools hwloc make git \
+    libnl3 gtk2 atk cairo tcl tcsh tk pciutils lsof ethtool bc file \
+    psmisc valgrind \
+    zlib zlib-devel procps \
+    slurm slurm-slurmctld slurm-slurmd munge \
+    bzip2 bzip2-devel rpm-build libffi-devel vim && \
+    dnf clean all
+
+RUN wget https://www.python.org/ftp/python/3.11.7/Python-3.11.7.tgz && \
+    tar xvf Python-3.11.7.tgz && \
+    cd Python-3.11.7 && \
+    ./configure --enable-optimizations && \
+    make altinstall && \
+    /usr/local/bin/python3.11 -m pip install --upgrade pip && \
+    /usr/local/bin/python3.11 -m pip install sphinx recommonmark docutils sphinx-rtd-theme && \
+    ln -s /usr/local/bin/python3.11 /usr/local/bin/python
+
+# ------------------------------------------------------------
+# Define support libraries
+# - hwloc
+# - libevent
+# ------------------------------------------------------------
+RUN mkdir -p /opt/hpc/local/build
+COPY src /opt/hpc/local/src
+
+ARG LIBEVENT_INSTALL_PATH=/opt/hpc/local/libevent
+ENV LIBEVENT_INSTALL_PATH=$LIBEVENT_INSTALL_PATH
+ARG HWLOC_INSTALL_PATH=/opt/hpc/local/hwloc
+ENV HWLOC_INSTALL_PATH=$HWLOC_INSTALL_PATH
+
+RUN cd /opt/hpc/local/build && \
+    tar -zxf ../src/libevent* && \
+    cd libevent-* && \
+    ./configure --prefix=${LIBEVENT_INSTALL_PATH} > /dev/null && \
+    make > /dev/null && \
+    make install > /dev/null
+RUN cd /opt/hpc/local/build && \
+    tar -zxf ../src/hwloc-2* && \
+    cd hwloc-2* && \
+    ./configure --prefix=${HWLOC_INSTALL_PATH} > /dev/null && \
+    make > /dev/null && \
+    make install > /dev/null && \
+    cd .. && \
+    rm -rf /opt/hpc/local/src /opt/hpc/local/build/*
+ENV LD_LIBRARY_PATH="$HWLOC_INSTALL_PATH/bin:$LIBEVENT_INSTALL_PATH/lib"
+
+
+# -----------------------------
+# Allow forced rebuild from this point
+# -----------------------------
+COPY .build-timestamp /root/
+
+
+# ------------------------------------------------------------
+# Fixup the ssh login
+# ------------------------------------------------------------
+RUN ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" && \
+    ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key  -N "" && \
+    ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key  -N "" && \
+    echo "        LogLevel ERROR" >> /etc/ssh/ssh_config && \
+    echo "        StrictHostKeyChecking no" >> /etc/ssh/ssh_config && \
+    echo "        UserKnownHostsFile=/dev/null" >> /etc/ssh/ssh_config
+
+# ------------------------------------------------------------
+# Setup munge
+# ------------------------------------------------------------
+RUN /usr/sbin/create-munge-key && \
+    chown root /etc/munge && \
+    chgrp root /etc/munge && \
+    chown root /etc/munge/munge.key && \
+    chgrp root /etc/munge/munge.key && \
+    chown root /run/munge && \
+    chgrp root /run/munge
+
+# ------------------------------------------------------------
+# Setup slurm
+# ------------------------------------------------------------
+RUN mkdir /var/spool/slurmd && \
+    chown root /var/spool/slurmd && \
+    chgrp root /var/spool/slurmd
+
+
+# ------------------------------------------------------------
+# Adjust default ulimit for core files
+# ------------------------------------------------------------
+RUN echo '*               hard    core            -1' >> /etc/security/limits.conf && \
+    echo '*               soft    core            -1' >> /etc/security/limits.conf && \
+    echo 'ulimit -c unlimited' >> /root/.bashrc
+
+# ------------------------------------------------------------
+# Create a user account
+# ------------------------------------------------------------
+RUN groupadd -r mpiuser && useradd --no-log-init -r -m -b /home -g mpiuser -G wheel mpiuser
+USER mpiuser
+RUN  cd /home/mpiuser && \
+        ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa && chmod og+rX . && \
+        cd .ssh && cat id_rsa.pub > authorized_keys && chmod 644 authorized_keys && \
+        exit
+
+# ------------------------------------------------------------
+# Give the user passwordless sudo powers
+# ------------------------------------------------------------
+USER root
+RUN echo "mpiuser    ALL = NOPASSWD: ALL" >> /etc/sudoers
+
+# ------------------------------------------------------------
+# Adjust the default environment
+# ------------------------------------------------------------
+USER root
+
+ENV PRTE_MCA_prte_default_hostfile=/opt/hpc/etc/hostfile.txt
+ENV OMPI_MCA_btl_tcp_if_include=eth0
+ENV PRTE_MCA_oob_tcp_if_include=eth0
+ENV PMIX_MCA_ptl_tcp_if_include=eth0
+ENV PATH=$PATH:/opt/hpc/local/hwloc/bin
+ENV PYTHONPATH=:/usr/local/bin
+# Need to do this so that the 'mpiuser' can have them too, not just root
+RUN echo "export PMIX_ROOT=/opt/hpc/external/pmix" >> /etc/bashrc && \
+    echo "export PRRTE_ROOT=/opt/hpc/external/prrte" >> /etc/bashrc  && \
+    echo "export MPI_ROOT=/opt/hpc/external/ompi" >> /etc/bashrc  && \
+    echo "export PATH=\$MPI_ROOT/bin:\$PATH" >> /etc/bashrc  && \
+    echo "export PATH=\$PRRTE_ROOT/bin:\$MPI_ROOT/bin:\$PATH" >> /etc/bashrc  && \
+    echo "export LD_LIBRARY_PATH=\$MPI_ROOT/lib:\$LD_LIBRARY_PATH" >> /etc/bashrc && \
+    echo "export LD_LIBRARY_PATH=\$PMIX_ROOT/lib:\$LD_LIBRARY_PATH" >> /etc/bashrc && \
+    echo "export LD_LIBRARY_PATH=$HWLOC_INSTALL_PATH/lib:$LIBEVENT_INSTALL_PATH/lib:\$LD_LIBRARY_PATH" >> /etc/bashrc && \
+    echo "export LD_LIBRARY_PATH=\$PRRTE_ROOT/lib:\$LD_LIBRARY_PATH" >> /etc/bashrc && \
+    echo "export PRTE_MCA_prte_default_hostfile=$PRTE_MCA_prte_default_hostfile" >> /etc/bashrc && \
+    echo "export OMPI_MCA_btl_tcp_if_include=$OMPI_MCA_btl_tcp_if_include" >> /etc/bashrc && \
+    echo "export PRTE_MCA_oob_tcp_if_include=$PRTE_MCA_oob_tcp_if_include" >> /etc/bashrc && \
+    echo "export PMIX_MCA_ptl_tcp_if_include=$PMIX_MCA_ptl_tcp_if_include" >> /etc/bashrc && \
+    echo "ulimit -c unlimited" >> /etc/bashrc && \
+    echo "alias pd=pushd" >> /etc/bashrc && \
+    echo "sudo /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python2 50" >> /etc/bashrc && \
+    echo "sudo /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python3.10 40" >> /etc/bashrc && \
+    echo "export PYTHONPATH=:/usr/local/bin" >> /etc/bashrc  && \
+    echo "[safe]" >> /home/mpiuser/.gitconfig && \
+    echo "        directory = /opt/hpc/build/pmix" >> /home/mpiuser/.gitconfig && \
+    echo "        directory = /opt/hpc/build/prrte" >> /home/mpiuser/.gitconfig
+
+# ------------------------------------------------------------
+# Kick off the ssh daemon
+# ------------------------------------------------------------
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D"]
+
+USER root
+RUN /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python2 50 && \
+    /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python3.6 40
+

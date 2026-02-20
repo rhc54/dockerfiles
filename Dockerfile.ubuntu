@@ -1,0 +1,66 @@
+#
+# Base Build box for PRRTE CI
+# Requires:
+#  - Basic compile tooling and runtime support
+#  - libevent
+#  - hwloc 2.x
+# Optional:
+#  - PMIx - built in a location that can be replaced with volume mount
+#    - For now use 'master' branch
+#  - PRRTE - built in a location that can be replaced with volume mount
+#    - For now use 'master' branch
+#  - Open MPI - built in a location that can be replaced with volume mount
+#    - For now use 'master' branch
+#
+# Directory structure for volume mounting
+# - Build directory to mount in the source from the local file system
+#   /opt/hpc/local/build/
+# - Install directory to mount in an installation directory to be shared between containers
+#   /opt/hpc/external/{pmix,prrte,ompi}
+#
+FROM ubuntu:latest
+
+# ------------------------------------------------------------
+# Install required packages
+# ------------------------------------------------------------
+RUN apt-get update && \
+    apt-get -y install build-essential && \
+    apt-get -y install \
+    openssh-server openssh-client libssl-dev \
+    strace \
+    binutils less wget which sudo \
+    perl libdata-dumper-compact-perl numactl \
+    autoconf automake libtool flex bison \
+    iproute2 net-tools hwloc libhwloc-dev make git \
+    libnl-3-dev libgtk-3-0 libatk1.0-0 libcairo2 tcl tcsh tk pciutils lsof ethtool bc file \
+    psmisc valgrind software-properties-common \
+    zlib1g-dev procps libevent-dev \
+    bzip2 libbz2-dev rpm libffi-dev vim && \
+    apt-get clean all
+
+RUN add-apt-repository ppa:deadsnakes/ppa -y && \
+    apt-get update && \
+    apt-get -y install python3.12
+
+
+# -----------------------------
+# Allow forced rebuild from this point
+# -----------------------------
+COPY .build-timestamp /root/
+
+
+# ------------------------------------------------------------
+# Create a user account
+# ------------------------------------------------------------
+RUN groupadd -r mpiuser && useradd --no-log-init -r -m -b /home -g mpiuser -G mpiuser mpiuser
+USER mpiuser
+RUN  cd /home/mpiuser && \
+        ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa && chmod og+rX . && \
+        cd .ssh && cat id_rsa.pub > authorized_keys && chmod 644 authorized_keys && \
+        exit
+
+# ------------------------------------------------------------
+# Give the user passwordless sudo powers
+# ------------------------------------------------------------
+USER root
+RUN echo "mpiuser    ALL = NOPASSWD: ALL" >> /etc/sudoers

@@ -18,26 +18,37 @@
 # - Install directory to mount in an installation directory to be shared between containers
 #   /opt/hpc/external/{pmix,prrte,ompi}
 #
-FROM centos:7
-
-MAINTAINER Josh Hursey <jhursey@us.ibm.com>
+FROM rockylinux:9
 
 # ------------------------------------------------------------
 # Install required packages
 # ------------------------------------------------------------
-RUN yum -y update && \
-    yum -y install \
-    openssh-server openssh-clients \
-    gcc gcc-gfortran gcc-c++ gdb strace \
+RUN dnf -y update && \
+    dnf -y install epel-release && \
+    dnf repolist && \
+    dnf -y group install "Development Tools" && \
+    dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo && \
+    dnf -y install \
+    openssh-server openssh-clients openssl-devel\
+    strace \
     binutils less wget which sudo \
-    perl perl-Data-Dumper \
+    perl perl-Data-Dumper numactl \
     autoconf automake libtool flex bison \
     iproute net-tools hwloc make git \
     libnl3 gtk2 atk cairo tcl tcsh tk pciutils lsof ethtool bc file \
-    psmisc valgrind && \
-    yum -y install epel-release && \
-    yum -y install pandoc --enablerepo=epel && \
-    yum clean all
+    psmisc valgrind man \
+    zlib zlib-devel procps libesmtp-devel \
+    bzip2 bzip2-devel rpm-build libffi-devel vim && \
+    dnf clean all
+
+RUN wget https://www.python.org/ftp/python/3.11.7/Python-3.11.7.tgz && \
+    tar xvf Python-3.11.7.tgz && \
+    cd Python-3.11.7 && \
+    ./configure --enable-optimizations && \
+    make altinstall && \
+    /usr/local/bin/python3.11 -m pip install --upgrade pip && \
+    /usr/local/bin/python3.11 -m pip install sphinx recommonmark docutils sphinx-rtd-theme && \
+    ln -s /usr/local/bin/python3.11 /usr/local/bin/python
 
 # ------------------------------------------------------------
 # Define support libraries
@@ -59,97 +70,20 @@ RUN cd /opt/hpc/local/build && \
     make > /dev/null && \
     make install > /dev/null
 RUN cd /opt/hpc/local/build && \
-    tar -zxf ../src/hwloc-2* && \
+    tar xf ../src/hwloc-2* && \
     cd hwloc-2* && \
     ./configure --prefix=${HWLOC_INSTALL_PATH} > /dev/null && \
     make > /dev/null && \
     make install > /dev/null && \
     cd .. && \
     rm -rf /opt/hpc/local/src /opt/hpc/local/build/*
-ENV LD_LIBRARY_PATH="$HWLOC_INSTALL_PATH/bin:$LIBEVENT_INSTALL_PATH/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="$HWLOC_INSTALL_PATH/bin:$LIBEVENT_INSTALL_PATH/lib"
 
 
 # -----------------------------
 # Allow forced rebuild from this point
 # -----------------------------
 COPY .build-timestamp /root/
-
-
-# ------------------------------------------------------------
-# PMIx Install
-# ------------------------------------------------------------
-ENV PMIX_ROOT=/opt/hpc/external/pmix
-ENV LD_LIBRARY_PATH="$PMIX_ROOT/lib:${LD_LIBRARY_PATH}"
-
-RUN cd /opt/hpc/local/build && \
-    git clone -q -b master https://github.com/openpmix/openpmix.git && \
-    cd openpmix && \
-    ./autogen.pl && \
-    ./configure --prefix=${PMIX_ROOT} \
-                --with-hwloc=${HWLOC_INSTALL_PATH} \
-                --with-libevent=${LIBEVENT_INSTALL_PATH} 2>&1 | tee configure.log.$$ 2>&1 && \
-    make -j 10 2>&1 | tee make.log.$$ 2>&1 && \
-    make -j 10 install 2>&1 | tee make.install.log.$$ && \
-    cd .. && rm -rf /opt/hpc/local/build/*
-
-# ------------------------------------------------------------
-# PRRTE Install
-# ------------------------------------------------------------
-ENV PRRTE_ROOT=/opt/hpc/external/prrte
-ENV PATH="$PRRTE_ROOT/bin:${PATH}"
-ENV LD_LIBRARY_PATH="$PRRTE_ROOT/lib:${LD_LIBRARY_PATH}"
-
-RUN cd /opt/hpc/local/build && \
-    git clone -q -b master https://github.com/openpmix/prrte.git && \
-    cd prrte && \
-    ./autogen.pl && \
-    ./configure --prefix=${PRRTE_ROOT} \
-                --with-hwloc=${HWLOC_INSTALL_PATH} \
-                --with-libevent=${LIBEVENT_INSTALL_PATH} \
-                --with-pmix=${PMIX_ROOT} 2>&1 | tee configure.log.$$ 2>&1 && \
-    make -j 10 2>&1 | tee make.log.$$ 2>&1 && \
-    make install 2>&1 | tee make.install.log.$$ 2>&1 && \
-    rm -rf /opt/hpc/local/build/*
-
-# ------------------------------------------------------------
-# Open MPI Install
-# ------------------------------------------------------------
-ENV MPI_ROOT=/opt/hpc/external/ompi
-
-ENV PATH="$MPI_ROOT/bin:${PATH}"
-ENV LD_LIBRARY_PATH="$MPI_ROOT/lib:${LD_LIBRARY_PATH}"
-
-ARG _BUILD_OMPI_VERSION=4.0.3
-ENV _BUILD_OMPI_VERSION=${_BUILD_OMPI_VERSION}
-ARG _BUILD_OMPI_BASE_VERSION=4.0
-ENV _BUILD_OMPI_BASE_VERSION=${_BUILD_OMPI_BASE_VERSION}
-
-# Testing a release tarball of OMPI
-RUN cd /opt/hpc/local/build && \
-    wget -q https://download.open-mpi.org/release/open-mpi/v${_BUILD_OMPI_BASE_VERSION}/openmpi-${_BUILD_OMPI_VERSION}.tar.gz && \
-    tar -zxf openmpi-${_BUILD_OMPI_VERSION}.tar.gz  && \
-    cd openmpi-${_BUILD_OMPI_VERSION} && \
-    ./configure --prefix=${MPI_ROOT} \
-                --with-hwloc=${HWLOC_INSTALL_PATH} \
-                --with-libevent=${LIBEVENT_INSTALL_PATH} \
-                --with-pmix=${PMIX_ROOT} \
-                --enable-mpirun-prefix-by-default 2>&1 | tee configure.log.$$ 2>&1 && \
-    make -j 10   2>&1 | tee make.log.$$ 2>&1 && \
-    make install 2>&1 | tee make.install.log.$$ 2>&1
-
-# ------------------------------------------------------------
-# Flush but keep the build directory
-# - We will mount in the pmix/prrte/ompi source in there
-# ------------------------------------------------------------
-RUN rm -rf /opt/hpc/local/build && mkdir -p /opt/hpc/local/build
-
-# ------------------------------------------------------------
-# Copy in an MPI test program
-# ------------------------------------------------------------
-RUN mkdir -p /opt/hpc/examples && chmod og+rwX /opt/hpc/examples && \
-    mkdir -p /opt/hpc/etc && chmod og+rwX /opt/hpc/etc
-COPY tests /opt/hpc/examples
-RUN cd /opt/hpc/examples && make
 
 
 # ------------------------------------------------------------
@@ -179,18 +113,32 @@ RUN  cd /home/mpiuser && \
         cd .ssh && cat id_rsa.pub > authorized_keys && chmod 644 authorized_keys && \
         exit
 
+USER root
+RUN groupadd -r user2 && useradd --no-log-init -r -m -b /home -g user2 -G wheel user2
+USER user2
+RUN  cd /home/user2 && \
+        ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa && chmod og+rX . && \
+        cd .ssh && cat id_rsa.pub > authorized_keys && chmod 644 authorized_keys && \
+        exit
+
 # ------------------------------------------------------------
 # Give the user passwordless sudo powers
 # ------------------------------------------------------------
 USER root
 RUN echo "mpiuser    ALL = NOPASSWD: ALL" >> /etc/sudoers
+RUN echo "user2      ALL = NOPASSWD: ALL" >> /etc/sudoers
 
 # ------------------------------------------------------------
 # Adjust the default environment
 # ------------------------------------------------------------
 USER root
 
-ENV PRRTE_MCA_prrte_default_hostfile=/opt/hpc/etc/hostfile.txt
+ENV PRTE_MCA_prte_default_hostfile=/opt/hpc/etc/hostfile.txt
+ENV OMPI_MCA_btl_tcp_if_include=eth0
+ENV PRTE_MCA_oob_tcp_if_include=eth0
+ENV PMIX_MCA_ptl_tcp_if_include=eth0
+ENV PATH=$PATH:/opt/hpc/local/hwloc/bin
+ENV PYTHONPATH=:/usr/local/bin
 # Need to do this so that the 'mpiuser' can have them too, not just root
 RUN echo "export PMIX_ROOT=/opt/hpc/external/pmix" >> /etc/bashrc && \
     echo "export PRRTE_ROOT=/opt/hpc/external/prrte" >> /etc/bashrc  && \
@@ -201,14 +149,29 @@ RUN echo "export PMIX_ROOT=/opt/hpc/external/pmix" >> /etc/bashrc && \
     echo "export LD_LIBRARY_PATH=\$PMIX_ROOT/lib:\$LD_LIBRARY_PATH" >> /etc/bashrc && \
     echo "export LD_LIBRARY_PATH=$HWLOC_INSTALL_PATH/lib:$LIBEVENT_INSTALL_PATH/lib:\$LD_LIBRARY_PATH" >> /etc/bashrc && \
     echo "export LD_LIBRARY_PATH=\$PRRTE_ROOT/lib:\$LD_LIBRARY_PATH" >> /etc/bashrc && \
-    echo "export PRRTE_MCA_prrte_default_hostfile=$PRRTE_MCA_prrte_default_hostfile" >> /etc/bashrc && \
-    echo "export LIBEVENT_INSTALL_PATH=/opt/hpc/local/libevent" >> /etc/bashrc && \
-    echo "export HWLOC_INSTALL_PATH=/opt/hpc/local/hwloc" >> /etc/bashrc && \
+    echo "export PRTE_MCA_prte_default_hostfile=$PRTE_MCA_prte_default_hostfile" >> /etc/bashrc && \
+    echo "export OMPI_MCA_btl_tcp_if_include=$OMPI_MCA_btl_tcp_if_include" >> /etc/bashrc && \
+    echo "export PRTE_MCA_oob_tcp_if_include=$PRTE_MCA_oob_tcp_if_include" >> /etc/bashrc && \
+    echo "export PMIX_MCA_ptl_tcp_if_include=$PMIX_MCA_ptl_tcp_if_include" >> /etc/bashrc && \
+    echo "export CPPFLAGS=-I$MPI_ROOT/include" >> /etc/bashrc && \
+    echo "export LDFLAGS=-L$MPI_ROOT/lib" >> /etc/bashrc && \
+    echo "export MPI4PY_TEST_SPAWN=true" >> /etc/bashrc && \
     echo "ulimit -c unlimited" >> /etc/bashrc && \
-    echo "alias pd=pushd" >> /etc/bashrc
+    echo "alias pd=pushd" >> /etc/bashrc && \
+    echo "sudo /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python2 50" >> /etc/bashrc && \
+    echo "sudo /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python3.10 40" >> /etc/bashrc && \
+    echo "export PYTHONPATH=:/usr/local/bin" >> /etc/bashrc  && \
+    echo "[safe]" >> /home/mpiuser/.gitconfig && \
+    echo "        directory = /opt/hpc/build/pmix" >> /home/mpiuser/.gitconfig && \
+    echo "        directory = /opt/hpc/build/prrte" >> /home/mpiuser/.gitconfig
 
 # ------------------------------------------------------------
 # Kick off the ssh daemon
 # ------------------------------------------------------------
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]
+
+USER root
+RUN /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python2 50 && \
+    /usr/sbin/alternatives --install /usr/bin/python python /usr/bin/python3.6 40
+
